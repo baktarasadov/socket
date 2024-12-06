@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat Application</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f2f5;
+      }
+
+      .container {
+        display: flex;
+        height: 100vh;
+        padding: 20px;
+      }
+
+      .auth-container {
+        max-width: 400px;
+        margin: 40px auto;
+        padding: 20px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .sidebar {
+        width: 300px;
+        background: white;
+        border-right: 1px solid #ddd;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .chat-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: white;
+        margin-left: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .user-list {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .user-item {
+        padding: 15px;
+        border-bottom: 1px solid #eee;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+      }
+
+      .user-item:hover {
+        background-color: #f5f5f5;
+      }
+
+      .user-item.active {
+        background-color: #e3f2fd;
+      }
+
+      .user-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: #1976d2;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 10px;
+        font-weight: bold;
+      }
+
+      .user-info {
+        flex: 1;
+      }
+
+      .user-name {
+        font-weight: 500;
+        margin-bottom: 3px;
+      }
+
+      .user-status {
+        font-size: 12px;
+        color: #666;
+      }
+
+      .messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+      }
+
+      .message {
+        max-width: 70%;
+        margin-bottom: 10px;
+        padding: 10px;
+        border-radius: 8px;
+        position: relative;
+      }
+
+      .message-sent {
+        background-color: #e3f2fd;
+        margin-left: auto;
+      }
+
+      .message-received {
+        background-color: #f5f5f5;
+      }
+
+      .message-time {
+        font-size: 11px;
+        color: #666;
+        margin-top: 5px;
+      }
+
+      .input-container {
+        padding: 20px;
+        border-top: 1px solid #ddd;
+        display: flex;
+        gap: 10px;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        padding: 10px 20px;
+        background-color: #1976d2;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background-color: #1565c0;
+      }
+
+      .auth-toggle {
+        text-align: center;
+        margin-top: 10px;
+      }
+
+      .auth-toggle span {
+        color: #1976d2;
+        cursor: pointer;
+      }
+
+      .no-chat-selected {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #666;
+        font-size: 1.2em;
+      }
+
+      .role-badge {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        background-color: #e3f2fd;
+        color: #1976d2;
+        margin-left: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="authForms" class="auth-container">
+      <div id="loginForm">
+        <h2>Login</h2>
+        <input type="text" id="loginUsername" placeholder="Username" />
+        <input type="password" id="loginPassword" placeholder="Password" />
+        <button onclick="login()">Login</button>
+        <div class="auth-toggle">
+          Don't have an account?
+          <span onclick="toggleAuth('register')">Register</span>
+        </div>
+      </div>
+
+      <div id="registerForm" style="display: none">
+        <h2>Register</h2>
+        <input type="text" id="registerUsername" placeholder="Username" />
+        <input type="password" id="registerPassword" placeholder="Password" />
+        <select id="role">
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button onclick="register()">Register</button>
+        <div class="auth-toggle">
+          Already have an account?
+          <span onclick="toggleAuth('login')">Login</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="chatInterface" class="container" style="display: none">
+      <div class="sidebar">
+        <div class="search-container">
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Search users..."
+            onkeyup="searchUsers()"
+          />
+        </div>
+        <div class="user-list" id="userList">
+          <!-- Users will be populated here -->
+        </div>
+      </div>
+
+      <div class="chat-container">
+        <div id="noChatSelected" class="no-chat-selected">
+          Select a user to start chatting
+        </div>
+        <div
+          id="activeChat"
+          style="
+            display: none;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+          "
+        >
+          <div id="chatHeader" class="chat-header">
+            <!-- Selected user info will be shown here -->
+          </div>
+          <div id="messages" class="messages">
+            <!-- Messages will be populated here -->
+          </div>
+          <div class="input-container">
+            <input
+              type="text"
+              id="messageInput"
+              placeholder="Type a message..."
+            />
+            <button onclick="sendMessage()">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let currentUser = null;
+      let socket = null;
+      let selectedUser = null;
+      let users = [];
+
+      function toggleAuth(form) {
+        document.getElementById("loginForm").style.display =
+          form === "login" ? "block" : "none";
+        document.getElementById("registerForm").style.display =
+          form === "register" ? "block" : "none";
+      }
+
+      async function register() {
+        const username = document.getElementById("registerUsername").value;
+        const password = document.getElementById("registerPassword").value;
+        const role = document.getElementById("role").value;
+
+        try {
+          const response = await fetch("/register", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ username, password, role }),
+          });
+
+          if (response.ok) {
+            alert("Registration successful!");
+            toggleAuth("login");
+          } else {
+            const error = await response.json();
+            alert(error.error);
+          }
+        } catch (error) {
+          alert("Registration failed");
+        }
+      }
+
+      async function login() {
+        const username = document.getElementById("loginUsername").value;
+        const password = document.getElementById("loginPassword").value;
+
+        try {
+          const response = await fetch("/login", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ username, password }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            currentUser = data.user;
+            localStorage.setItem("token", data.token);
+            initializeChat();
+          } else {
+            const error = await response.json();
+            alert(error.error);
+          }
+        } catch (error) {
+          alert("Login failed");
+        }
+      }
+
+      function initializeChat() {
+        document.getElementById("authForms").style.display = "none";
+        document.getElementById("chatInterface").style.display = "flex";
+
+        socket = io({
+          auth: {
+            token: localStorage.getItem("token"),
+          },
+        });
+
+        socket.on("chat message", (msg) => {
+          if (
+            selectedUser &&
+            (msg.sender === selectedUser._id || msg.sender === currentUser._id)
+          ) {
+            addMessageToChat(msg);
+          }
+        });
+
+        socket.on("user status", ({ userId, online }) => {
+          updateUserStatus(userId, online);
+        });
+
+        loadUsers();
+      }
+
+      async function loadUsers() {
+        try {
+          const response = await fetch("/users", {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          });
+
+          if (response.ok) {
+            const allUsers = await response.json();
+            // Filter users based on current user's role
+            users = filterUsersByRole(allUsers);
+            displayUsers(users);
+          }
+        } catch (error) {
+          console.error("Error loading users:", error);
+        }
+      }
+
+      function filterUsersByRole(allUsers) {
+        if (!currentUser) return [];
+
+        // If current user is admin, show all users except themselves
+        if (currentUser.role === "admin") {
+          return allUsers.filter((user) => user._id !== currentUser._id);
+        }
+
+        // If current user is regular user, show only admin users
+        return allUsers.filter((user) => user.role === "admin");
+      }
+
+      function displayUsers(users) {
+        const userList = document.getElementById("userList");
+        userList.innerHTML = "";
+
+        users.forEach((user) => {
+          const div = document.createElement("div");
+          div.className = "user-item";
+          div.onclick = () => selectUser(user);
+
+          div.innerHTML = `
+            <div class="user-avatar">${user.username[0].toUpperCase()}</div>
+            <div class="user-info">
+              <div class="user-name">
+                ${user.username}
+                ${
+                  currentUser.role === "admin"
+                    ? `<span class="role-badge">${user.role}</span>`
+                    : ""
+                }
+              </div>
+              <div class="user-status">
+                ${user.online ? "Online" : "Offline"}
+              </div>
+            </div>
+          `;
+
+          userList.appendChild(div);
+        });
+      }
+
+      function searchUsers() {
+        const searchTerm = document
+          .getElementById("searchInput")
+          .value.toLowerCase();
+        const filteredUsers = users.filter((user) =>
+          user.username.toLowerCase().includes(searchTerm)
+        );
+        displayUsers(filteredUsers);
+      }
+
+      async function selectUser(user) {
+        selectedUser = user;
+        document.getElementById("noChatSelected").style.display = "none";
+        document.getElementById("activeChat").style.display = "flex";
+
+        const userRole =
+          currentUser.role === "admin"
+            ? `<span class="role-badge">${user.role}</span>`
+            : "";
+
+        document.getElementById("chatHeader").innerHTML = `
+          <div class="user-avatar">${user.username[0].toUpperCase()}</div>
+          <div class="user-info">
+            <div class="user-name">
+              ${user.username}
+              ${userRole}
+            </div>
+            <div class="user-status">
+              ${user.online ? "Online" : "Offline"}
+            </div>
+          </div>
+        `;
+
+        loadMessages(user._id);
+
+        document.querySelectorAll(".user-item").forEach((item) => {
+          item.classList.remove("active");
+          if (
+            item.querySelector(".user-name").textContent.includes(user.username)
+          ) {
+            item.classList.add("active");
+          }
+        });
+      }
+
+      async function loadMessages(userId) {
+        try {
+          const response = await fetch(`/messages?userId=${userId}`, {
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+          });
+
+          if (response.ok) {
+            const messages = await response.json();
+            const messagesDiv = document.getElementById("messages");
+            messagesDiv.innerHTML = "";
+            messages.forEach((msg) => addMessageToChat(msg));
+          }
+        } catch (error) {
+          console.error("Error loading messages:", error);
+        }
+      }
+
+      function sendMessage() {
+        const input = document.getElementById("messageInput");
+        const message = input.value.trim();
+
+        if (message && selectedUser && socket) {
+          socket.emit("chat message", {
+            receiverId: selectedUser._id,
+            message: message,
+          });
+          input.value = "";
+        }
+      }
+
+      function addMessageToChat(msg) {
+        const messagesDiv = document.getElementById("messages");
+        const messageDiv = document.createElement("div");
+        const isSent = msg.sender === currentUser._id;
+
+        messageDiv.className = `message ${
+          isSent ? "message-sent" : "message-received"
+        }`;
+        messageDiv.innerHTML = `
+          <div class="message-content">${msg.content}</div>
+          <div class="message-time">
+            ${new Date(msg.timestamp).toLocaleTimeString()}
+          </div>
+        `;
+
+        messagesDiv.appendChild(messageDiv);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      }
+
+      function updateUserStatus(userId, online) {
+        const userIndex = users.findIndex((u) => u._id === userId);
+        if (userIndex !== -1) {
+          users[userIndex].online = online;
+          displayUsers(users);
+        }
+      }
+
+      document
+        .getElementById("messageInput")
+        ?.addEventListener("keypress", function (e) {
+          if (e.key === "Enter") {
+            sendMessage();
+          }
+        });
+    </script>
+  </body>
+</html>
